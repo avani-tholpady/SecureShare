@@ -1,0 +1,13 @@
+*.py
+requirements*.txt
+template.yaml
+deploy*
+cleanup*
+build_package.py
+test_*.py
+backup/
+dist/
+uploads/
+__pycache__/
+.git/
+.env*

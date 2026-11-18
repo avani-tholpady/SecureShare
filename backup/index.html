@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SecureShare | Secure File Exchange</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+
+    <nav class="navbar">
+        <div class="logo">☁ SecureShare</div>
+        <div class="nav-right">
+            <span>Secure File Exchange</span>
+        </div>
+    </nav>
+
+    <main class="container">
+
+        <section class="welcome">
+            <h1>Share files securely.</h1>
+            <p>Upload your documents and create secure links
+                that expire when you want them to.</p>
+        </section>
+
+        <section class="upload-card">
+            <h2>Upload a document</h2>
+            <p class="subtitle">Choose a file to get started.</p>
+
+            <label for="fileInput" class="drop-area">
+                <div class="upload-icon">☁</div>
+                <h3>Choose a file to upload</h3>
+                <p>Click here to browse your device</p>
+                <span class="browse-btn">Browse Files</span>
+                <input type="file" id="fileInput" hidden>
+            </label>
+
+            <div id="fileInfo" class="file-info"></div>
+
+            <div class="settings">
+                <div class="setting-group">
+                    <label for="expiry">Link expiration</label>
+                    <select id="expiry">
+                        <option value="1">1 hour</option>
+                        <option value="24" selected>24 hours</option>
+                        <option value="168">7 days</option>
+                    </select>
+                </div>
+
+                <div class="setting-group">
+                    <label for="downloads">Maximum downloads</label>
+                    <select id="downloads">
+                        <option value="1">1 download</option>
+                        <option value="3" selected>3 downloads</option>
+                        <option value="5">5 downloads</option>
+                        <option value="10">10 downloads</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="password-setting">
+                <label>
+                    <input type="checkbox" id="passwordEnabled">
+                    Require password for access
+                </label>
+                <input type="password" id="sharePassword" placeholder="Enter sharing password" class="password-input"
+                    hidden>
+            </div>
+
+            <button id="generateBtn" class="primary-btn">
+                Generate Secure Link
+            </button>
+
+            <div id="result" class="result" hidden>
+                <h3>Your sharing link is ready!</h3>
+                <div class="link-row">
+                    <input type="text" id="shareLink" readonly>
+                    <button id="copyBtn">Copy</button>
+                </div>
+                <p id="linkDetails"></p>
+            </div>
+        </section>
+
+        <section class="features">
+            <div class="feature">
+                <span>🔒</span>
+                <h3>Secure Sharing</h3>
+                <p>Control who can access your documents.</p>
+            </div>
+
+            <div class="feature">
+                <span>⏱️</span>
+                <h3>Auto Expiration</h3>
+                <p>Sharing links have a limited lifetime.</p>
+            </div>
+
+            <div class="feature">
+                <span>📥</span>
+                <h3>Download Limits</h3>
+                <p>Restrict the number of downloads.</p>
+            </div>
+        </section>
+
+    </main>
+
+    <footer>
+        <p>© 2026 SecureShare | Cloud-Based Secure Document Exchange</p>
+    </footer>
+
+    <script src="config.js"></script>
+    <script src="script.js"></script>
+</body>
+
+</html>

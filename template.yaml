@@ -1,0 +1,249 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  SecureShare - Cloud-Based Secure Document Exchange & Expiring Link System.
+  Serverless Architecture using AWS Lambda, API Gateway, S3, and DynamoDB.
+  Configured for AWS Free Tier compliance and least-privilege security.
+
+Parameters:
+  Environment:
+    Type: String
+    Default: prod
+    AllowedValues:
+      - dev
+      - staging
+      - prod
+    Description: Deployment environment stage.
+
+  DynamoDBBillingMode:
+    Type: String
+    Default: PROVISIONED
+    AllowedValues:
+      - PROVISIONED
+      - PAY_PER_REQUEST
+    Description: PROVISIONED uses 5 RCU / 5 WCU within the AWS Always Free allowance (25 RCU/WCU). PAY_PER_REQUEST is on-demand.
+
+  FrontendUrl:
+    Type: String
+    Default: ""
+    Description: Deployed frontend URL (e.g. https://secureshare.vercel.app) to generate share URLs matching your domain.
+
+Conditions:
+  IsProvisioned: !Equals [!Ref DynamoDBBillingMode, "PROVISIONED"]
+
+Globals:
+  Function:
+    Timeout: 30
+    MemorySize: 256
+    Runtime: python3.12
+    Environment:
+      Variables:
+        STAGE: !Ref Environment
+        S3_BUCKET_NAME: !Ref DocumentsBucket
+        DYNAMODB_TABLE_NAME: !Ref ShareLinksTable
+        FRONTEND_URL: !Ref FrontendUrl
+
+Resources:
+  # ====================================================================
+  # S3 PRIVATE DOCUMENT STORAGE BUCKET
+  # - AES-256 server-side encryption
+  # - 100% public access blocked (no public URLs)
+  # - 30-day lifecycle auto-cleanup for cost control
+  # ====================================================================
+  DocumentsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "secureshare-documents-${AWS::AccountId}-${AWS::Region}"
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExpireOldDocumentsAfter30Days
+            Status: Enabled
+            ExpirationInDays: 30
+      CorsConfiguration:
+        CorsRules:
+          - AllowedHeaders:
+              - "*"
+            AllowedMethods:
+              - GET
+              - PUT
+              - HEAD
+            AllowedOrigins:
+              - "*"
+            MaxAge: 300
+
+  # ====================================================================
+  # DYNAMODB TABLE FOR SHARING METADATA
+  # - PROVISIONED mode: 5 RCU / 5 WCU (within 25 RCU/WCU Always Free tier)
+  # - TTL enabled on expires_at for automatic record cleanup
+  # ====================================================================
+  ShareLinksTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: ShareLinks
+      BillingMode: !If [IsProvisioned, !Ref "AWS::NoValue", "PAY_PER_REQUEST"]
+      ProvisionedThroughput: !If
+        - IsProvisioned
+        - ReadCapacityUnits: 5
+          WriteCapacityUnits: 5
+        - !Ref "AWS::NoValue"
+      AttributeDefinitions:
+        - AttributeName: token
+          AttributeType: S
+      KeySchema:
+        - AttributeName: token
+          KeyType: HASH
+      TimeToLiveSpecification:
+        AttributeName: expires_at
+        Enabled: true
+
+  # ====================================================================
+  # API GATEWAY (HTTP API WITH CORS & MULTIPART SUPPORT)
+  # ====================================================================
+  SecureShareHttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName: !Ref Environment
+      CorsConfiguration:
+        AllowHeaders:
+          - "Content-Type"
+          - "Authorization"
+          - "X-Requested-With"
+          - "Accept"
+        AllowMethods:
+          - "GET"
+          - "POST"
+          - "OPTIONS"
+        AllowOrigins:
+          - "*"
+        MaxAge: 300
+
+  # ====================================================================
+  # CLOUDWATCH LOG GROUP (COST CONTROL: 7 DAYS RETENTION)
+  # ====================================================================
+  SecureShareLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/secureshare-backend-${Environment}"
+      RetentionInDays: 7
+
+  # ====================================================================
+  # AWS LAMBDA FUNCTION (BACKEND SERVICE)
+  # - Least privilege IAM permissions
+  # - Connected to CloudWatch Logs with 7-day retention
+  # ====================================================================
+  SecureShareFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "secureshare-backend-${Environment}"
+      CodeUri: ./
+      Handler: lambda_function.lambda_handler
+      Description: Core backend handler for SecureShare uploads, validation, and downloads.
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - s3:GetObject
+                - s3:PutObject
+                - s3:DeleteObject
+                - s3:HeadObject
+              Resource: !Sub "${DocumentsBucket.Arn}/*"
+            - Effect: Allow
+              Action:
+                - s3:ListBucket
+                - s3:HeadBucket
+              Resource: !GetAtt DocumentsBucket.Arn
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+                - dynamodb:DeleteItem
+                - dynamodb:DescribeTable
+              Resource: !GetAtt ShareLinksTable.Arn
+      Events:
+        HealthCheck:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref SecureShareHttpApi
+            Path: /api/health
+            Method: GET
+
+        ShareUpload:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref SecureShareHttpApi
+            Path: /api/share
+            Method: POST
+
+        UploadRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref SecureShareHttpApi
+            Path: /api/upload
+            Method: POST
+
+        RevokeRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref SecureShareHttpApi
+            Path: /api/revoke/{token}
+            Method: POST
+
+        DeleteShareRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref SecureShareHttpApi
+            Path: /api/share/{token}
+            Method: DELETE
+
+        DownloadApiGet:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref SecureShareHttpApi
+            Path: /api/download/{token}
+            Method: GET
+
+        DownloadApiPost:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref SecureShareHttpApi
+            Path: /api/download/{token}
+            Method: POST
+
+        DownloadDirectGet:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref SecureShareHttpApi
+            Path: /download/{token}
+            Method: GET
+
+        DownloadDirectPost:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref SecureShareHttpApi
+            Path: /download/{token}
+            Method: POST
+
+Outputs:
+  ApiUrl:
+    Description: "API Gateway HTTP API Base URL"
+    Value: !Sub "https://${SecureShareHttpApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}"
+    Export:
+      Name: SecureShareApiUrl
+
+  DocumentsBucketName:
+    Description: "Private S3 Document Bucket"
+    Value: !Ref DocumentsBucket
+
+  DynamoDBTableName:
+    Description: "DynamoDB Metadata Table"
+    Value: !Ref ShareLinksTable
